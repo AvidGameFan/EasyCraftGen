@@ -4,15 +4,19 @@ namespace EasyCraftGen;
 
 public static class ImageTools
 {
-    public static (byte[] Source, byte[] Mask, int Width, int Height) PrepareFill(byte[] png, DocumentInfo doc)
+    public static (byte[] Source, byte[] Mask, int Width, int Height) PrepareFill(byte[] png, DocumentInfo doc, int megapixels, int pixelStep = 64)
     {
+        if (megapixels is not (1 or 2 or 4 or 8))
+            throw new ArgumentOutOfRangeException(nameof(megapixels), "Choose 1, 2, 4, or 8 megapixels.");
+        if (pixelStep is not (1 or 16 or 64))
+            throw new ArgumentOutOfRangeException(nameof(pixelStep), "Choose a pixel step of 1, 16, or 64.");
         if (doc.Selection is not { Length: 4 } s || s[2] <= 0 || s[3] <= 0)
             throw new InvalidOperationException("Select an area in PhotoCraft first.");
         using var source = SKBitmap.Decode(png) ?? throw new InvalidDataException("PhotoCraft did not export a valid image.");
         if (source.Width != doc.Width || source.Height != doc.Height) throw new InvalidDataException("Export dimensions do not match the document.");
-        double scale = Math.Min(1, Math.Sqrt(1_000_000.0 / (doc.Width * (double)doc.Height)));
-        int width = Math.Max(64, (int)Math.Round(doc.Width * scale / 64) * 64);
-        int height = Math.Max(64, (int)Math.Round(doc.Height * scale / 64) * 64);
+        double scale = Math.Min(1, Math.Sqrt(megapixels * 1_000_000.0 / (doc.Width * (double)doc.Height)));
+        int width = Math.Max(pixelStep, (int)Math.Round(doc.Width * scale / pixelStep) * pixelStep);
+        int height = Math.Max(pixelStep, (int)Math.Round(doc.Height * scale / pixelStep) * pixelStep);
         var left = Math.Clamp(s[0], 0, doc.Width);
         var top = Math.Clamp(s[1], 0, doc.Height);
         var right = (int)Math.Clamp((long)s[0] + s[2], 0, doc.Width);

@@ -29,6 +29,16 @@
         <StackPanel Spacing="5"><TextBlock Text="Steps"/><NumericUpDown x:Name="Steps" Value="25" Minimum="1" Maximum="150" FormatString="0"/></StackPanel>
         <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="Guidance"/><NumericUpDown x:Name="Guidance" Value="7.5" Minimum="0" Maximum="30" Increment="0.5"/></StackPanel>
       </Grid>
+      <Expander Header="Advanced">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Fill resolution (megapixels)"/>
+          <ComboBox x:Name="FillMegapixels" HorizontalAlignment="Stretch" AutomationProperties.Name="Fill resolution in megapixels"/>
+          <TextBlock Text="Higher resolutions use more VRAM and can take longer. Smaller documents are not enlarged to reach the target." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
+          <TextBlock Text="Fill pixel step"/>
+          <ComboBox x:Name="FillPixelStep" HorizontalAlignment="Stretch" AutomationProperties.Name="Fill pixel step"/>
+          <TextBlock Text="Dimensions are rounded to the selected step. Easy Diffusion or the model may require further alignment." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
+        </StackPanel>
+      </Expander>
       <TextBlock Text="Fill uses the selection's bounding rectangle for generation; the actual selection masks the new layer." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
       <Button x:Name="FillButton" Content="Generate fill" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="FillClick"/>
       <Separator/>

@@ -100,13 +100,17 @@ public class IntegrationTests
         var old = JsonSerializer.Deserialize<Settings>("""{"Model":"old"}""")!;
         Assert.Equal("euler", old.Sampler);
         Assert.Equal("simple", old.Scheduler);
+        Assert.Equal(1, old.FillMegapixels);
+        Assert.Equal(64, old.FillPixelStep);
         Assert.Empty(old.TextEncoders);
-        old.Sampler = "euler_a"; old.Scheduler = "karras"; old.Vae = "ae";
+        old.Sampler = "euler_a"; old.Scheduler = "karras"; old.Vae = "ae"; old.FillMegapixels = 8; old.FillPixelStep = 16;
         old.TextEncoders = ["clip_l", "t5xxl_fp16"];
         var loaded = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(old))!;
         Assert.Equal("euler_a", loaded.Sampler);
         Assert.Equal("karras", loaded.Scheduler);
         Assert.Equal("ae", loaded.Vae);
+        Assert.Equal(8, loaded.FillMegapixels);
+        Assert.Equal(16, loaded.FillPixelStep);
         Assert.Equal(new[] { "clip_l", "t5xxl_fp16" }, loaded.TextEncoders);
     }
 
@@ -148,13 +152,127 @@ public class IntegrationTests
         using var bitmap = new SKBitmap(128, 128);
         using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
         using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
-        var data = ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [32, 16, 200, 48]));
+        var data = ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [32, 16, 200, 48]), 1);
         using var mask = SKBitmap.Decode(data.Mask);
         Assert.Equal((128, 128), (data.Width, data.Height));
         Assert.Equal(SKColors.Black, mask.GetPixel(10, 10));
         Assert.Equal(SKColors.White, mask.GetPixel(40, 20));
         Assert.Equal(SKColors.Black, mask.GetPixel(40, 80));
-        Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, null)));
+        Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, null), 1));
+    }
+
+    [Theory]
+    [InlineData(1, 1024)]
+    [InlineData(2, 1408)]
+    [InlineData(4, 1984)]
+    [InlineData(8, 2816)]
+    public async Task FillResolutionSetsImageMaskAndRequestDimensions(int megapixels, int expected)
+    {
+        using var bitmap = new SKBitmap(3072, 3072);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 3072, 3072, [768, 768, 1536, 1536]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, megapixels);
+        Assert.Equal((expected, expected), (prepared.Width, prepared.Height));
+        using var source = SKBitmap.Decode(prepared.Source);
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal((expected, expected), (source.Width, source.Height));
+        Assert.Equal((expected, expected), (mask.Width, mask.Height));
+        Assert.Equal(SKColors.Black, mask.GetPixel(0, 0));
+        Assert.Equal(SKColors.White, mask.GetPixel(expected / 2, expected / 2));
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((_, body) =>
+        {
+            using var json = JsonDocument.Parse(body);
+            Assert.Equal(expected, json.RootElement.GetProperty("width").GetInt32());
+            Assert.Equal(expected, json.RootElement.GetProperty("height").GetInt32());
+            return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
+        }));
+        await client.FillAsync(new Settings { FillMegapixels = megapixels }, "prompt", "", prepared.Source, prepared.Mask,
+            prepared.Width, prepared.Height, new Progress<string>(), CancellationToken.None);
+    }
+
+    [Fact]
+    public void FillResolutionDoesNotEnlargeSmallDocumentsAndRejectsUnsupportedValues()
+    {
+        using var bitmap = new SKBitmap(128, 64);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 128, 64, [0, 0, 64, 64]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 8);
+        Assert.Equal((128, 64), (prepared.Width, prepared.Height));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageTools.PrepareFill(encoded.ToArray(), doc, 3));
+        Assert.Throws<ArgumentException>(() => new Settings { FillMegapixels = 3 }.Validate());
+    }
+
+    [Theory]
+    [InlineData(1, 1408, 704)]
+    [InlineData(2, 1984, 1024)]
+    [InlineData(4, 2048, 1024)]
+    public void FillResolutionPreservesLandscapeAspectRatioApproximately(int megapixels, int width, int height)
+    {
+        using var bitmap = new SKBitmap(2048, 1024);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 2048, 1024, [256, 128, 512, 512]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, megapixels);
+        Assert.Equal((width, height), (prepared.Width, prepared.Height));
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal((width, height), (mask.Width, mask.Height));
+        Assert.Equal(SKColors.White, mask.GetPixel(width / 4, height / 4));
+        Assert.Equal(SKColors.Black, mask.GetPixel(0, 0));
+    }
+
+    [Theory]
+    [InlineData(64, 1408, 704)]
+    [InlineData(16, 1408, 704)]
+    [InlineData(1, 1414, 707)]
+    public void FillPixelStepAlsoAppliesAfterMegapixelScaling(int step, int width, int height)
+    {
+        using var bitmap = new SKBitmap(2048, 1024);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 2048, 1024, [256, 128, 512, 512]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, step);
+        Assert.Equal((width, height), (prepared.Width, prepared.Height));
+    }
+
+    [Theory]
+    [InlineData(64, 1024, 704)]
+    [InlineData(16, 1008, 672)]
+    [InlineData(1, 1001, 677)]
+    public async Task FillPixelStepControlsSourceMaskAndRequestDimensions(int step, int width, int height)
+    {
+        using var bitmap = new SKBitmap(1001, 677);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 1001, 677, [200, 100, 400, 300]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, step);
+        Assert.Equal((width, height), (prepared.Width, prepared.Height));
+        using var source = SKBitmap.Decode(prepared.Source);
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal((width, height), (source.Width, source.Height));
+        Assert.Equal((width, height), (mask.Width, mask.Height));
+        Assert.Equal(SKColors.White, mask.GetPixel(width * 3 / 10, height * 3 / 10));
+        Assert.Equal(SKColors.Black, mask.GetPixel(0, 0));
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((_, body) =>
+        {
+            using var json = JsonDocument.Parse(body);
+            Assert.Equal(width, json.RootElement.GetProperty("width").GetInt32());
+            Assert.Equal(height, json.RootElement.GetProperty("height").GetInt32());
+            return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
+        }));
+        await client.FillAsync(new Settings { FillPixelStep = step }, "prompt", "", prepared.Source, prepared.Mask,
+            prepared.Width, prepared.Height, new Progress<string>(), CancellationToken.None);
+    }
+
+    [Fact]
+    public void FillPixelStepHonorsMinimumAndRejectsUnsupportedValues()
+    {
+        using var bitmap = new SKBitmap(5, 7);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 5, 7, [0, 0, 5, 7]);
+        var native = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1);
+        Assert.Equal((5, 7), (native.Width, native.Height));
+        var small = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 16);
+        Assert.Equal((16, 16), (small.Width, small.Height));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 8));
+        Assert.Throws<ArgumentException>(() => new Settings { FillPixelStep = 8 }.Validate());
     }
 
     [Fact]

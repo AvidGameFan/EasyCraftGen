@@ -19,6 +19,8 @@ public sealed class Settings
     public string UpscaleModel { get; set; } = "RealESRGAN_x4plus";
     public int Steps { get; set; } = 25;
     public double Guidance { get; set; } = 7.5;
+    public int FillMegapixels { get; set; } = 1;
+    public int FillPixelStep { get; set; } = 64;
     public int Scale { get; set; } = 2;
     public bool OnTop { get; set; } = true;
 
@@ -45,6 +47,10 @@ public sealed class Settings
             throw new ArgumentException("Text encoder names must be nonempty and unique.");
         if (Steps is < 1 or > 150 || Guidance is < 0 or > 30 || Scale is not (2 or 4))
             throw new ArgumentException("Invalid generation settings.");
+        if (FillMegapixels is not (1 or 2 or 4 or 8))
+            throw new ArgumentException("Select a fill resolution of 1, 2, 4, or 8 megapixels.");
+        if (FillPixelStep is not (1 or 16 or 64))
+            throw new ArgumentException("Select a fill pixel step of 1, 16, or 64 pixels.");
     }
 
     public static void ValidateServerUrl(string serverUrl)
