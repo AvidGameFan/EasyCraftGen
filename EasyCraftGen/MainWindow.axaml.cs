@@ -32,10 +32,10 @@ public partial class MainWindow : Window
 
     private void ClearModelChoices()
     {
-        ModelChoices.ItemsSource = null;
-        VaeChoices.ItemsSource = null;
+        UpdateModelChoices(Model, null);
+        UpdateModelChoices(Vae, null);
         EncoderChoices.ItemsSource = null;
-        UpscaleChoices.ItemsSource = null;
+        UpdateModelChoices(UpscaleModel, null);
     }
 
     private void ApplySettings(Settings s)
@@ -73,12 +73,11 @@ public partial class MainWindow : Window
 
     private void OnTopChanged(object? sender, RoutedEventArgs e) => Topmost = (sender as CheckBox)?.IsChecked == true;
     private void CancelClick(object? sender, RoutedEventArgs e) => job?.Cancel();
-    private void ModelChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(ModelChoices, Model);
-    private void VaeChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(VaeChoices, Vae);
-    private void UpscaleChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(UpscaleChoices, UpscaleModel);
-    private static void ApplyChoice(ComboBox choice, TextBox target)
+    private static void UpdateModelChoices(ComboBox choice, string[]? values)
     {
-        if (choice.SelectedItem is string value) { target.Text = value; choice.SelectedIndex = -1; }
+        var text = choice.Text;
+        choice.ItemsSource = values;
+        choice.Text = text;
     }
 
     private void EncoderChoiceChanged(object? sender, SelectionChangedEventArgs e)
@@ -110,10 +109,10 @@ public partial class MainWindow : Window
                 Status.Text = "The Easy Diffusion URL changed; refresh the model lists for the new server.";
                 return;
             }
-            ModelChoices.ItemsSource = catalog.Diffusion;
-            VaeChoices.ItemsSource = catalog.Vae;
+            UpdateModelChoices(Model, catalog.Diffusion);
+            UpdateModelChoices(Vae, catalog.Vae);
             EncoderChoices.ItemsSource = catalog.TextEncoders;
-            UpscaleChoices.ItemsSource = catalog.Upscalers;
+            UpdateModelChoices(UpscaleModel, catalog.Upscalers);
             Status.Text = $"Loaded {catalog.Diffusion.Length} diffusion models, {catalog.Vae.Length} VAEs, {catalog.TextEncoders.Length} text encoders, and {catalog.Upscalers.Length} upscalers. Some server entries may be download suggestions.";
         }
         catch (OperationCanceledException) { Status.Text = "Model refresh cancelled or timed out. Existing entries are unchanged."; }

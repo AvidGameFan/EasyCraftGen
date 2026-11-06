@@ -12,18 +12,18 @@
       <TextBlock Text="Negative prompt"/>
       <TextBox x:Name="NegativePrompt" PlaceholderText="Optional"/>
       <TextBlock Text="Diffusion model"/>
-      <TextBox x:Name="Model" Text="sd-v1-5" PlaceholderText="Model name in Easy Diffusion"/>
-      <ComboBox x:Name="ModelChoices" PlaceholderText="Choose an available diffusion model" HorizontalAlignment="Stretch" SelectionChanged="ModelChoiceChanged"/>
+      <ComboBox x:Name="Model" IsEditable="True" Text="sd-v1-5" PlaceholderText="Model name in Easy Diffusion" HorizontalAlignment="Stretch" AutomationProperties.Name="Diffusion model"/>
       <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
         <StackPanel Spacing="5"><TextBlock Text="Sampler"/><ComboBox x:Name="Sampler" HorizontalAlignment="Stretch"/></StackPanel>
         <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="Scheduler"/><ComboBox x:Name="Scheduler" HorizontalAlignment="Stretch"/></StackPanel>
       </Grid>
       <TextBlock Text="VAE (optional)"/>
-      <TextBox x:Name="Vae" PlaceholderText="Default / embedded"/>
-      <ComboBox x:Name="VaeChoices" PlaceholderText="Choose an available VAE" HorizontalAlignment="Stretch" SelectionChanged="VaeChoiceChanged"/>
+      <ComboBox x:Name="Vae" IsEditable="True" PlaceholderText="Default / embedded" HorizontalAlignment="Stretch" AutomationProperties.Name="VAE"/>
       <TextBlock Text="Text encoders (optional)"/>
-      <TextBox x:Name="TextEncoders" AcceptsReturn="True" Height="65" TextWrapping="NoWrap" PlaceholderText="One model name per line, in order"/>
-      <ComboBox x:Name="EncoderChoices" PlaceholderText="Add an available text encoder" HorizontalAlignment="Stretch" SelectionChanged="EncoderChoiceChanged"/>
+      <Grid ColumnDefinitions="*,40">
+        <TextBox x:Name="TextEncoders" AcceptsReturn="True" Height="65" TextWrapping="NoWrap" PlaceholderText="One model name per line, in order"/>
+        <ComboBox Grid.Column="1" x:Name="EncoderChoices" HorizontalAlignment="Stretch" VerticalAlignment="Top" AutomationProperties.Name="Add text encoder" ToolTip.Tip="Add a text encoder" SelectionChanged="EncoderChoiceChanged"/>
+      </Grid>
       <TextBlock Text="Choose encoders to add them, or edit the list above. Leave empty for the default." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
       <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
         <StackPanel Spacing="5"><TextBlock Text="Steps"/><NumericUpDown x:Name="Steps" Value="25" Minimum="1" Maximum="150" FormatString="0"/></StackPanel>
@@ -34,8 +34,7 @@
       <Separator/>
       <TextBlock Text="Upscale" FontWeight="SemiBold" FontSize="16"/>
       <TextBlock Text="Real-ESRGAN model"/>
-      <TextBox x:Name="UpscaleModel" Text="RealESRGAN_x4plus"/>
-      <ComboBox x:Name="UpscaleChoices" PlaceholderText="Choose an available upscaler" HorizontalAlignment="Stretch" SelectionChanged="UpscaleChoiceChanged"/>
+      <ComboBox x:Name="UpscaleModel" IsEditable="True" Text="RealESRGAN_x4plus" HorizontalAlignment="Stretch" AutomationProperties.Name="Upscaler model"/>
       <StackPanel Orientation="Horizontal" Spacing="10">
         <TextBlock Text="Scale" VerticalAlignment="Center"/>
         <ComboBox x:Name="Scale" SelectedIndex="0"><ComboBoxItem Content="2x"/><ComboBoxItem Content="4x"/></ComboBox>
