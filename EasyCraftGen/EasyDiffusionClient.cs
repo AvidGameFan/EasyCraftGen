@@ -22,14 +22,55 @@ public sealed class EasyDiffusionClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<ModelCatalog> GetModelsAsync(CancellationToken ct)
+    {
+        using var response = await http.GetAsync("get/models", ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"Easy Diffusion model list returned {(int)response.StatusCode}: {body}");
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("models", out var models) ||
+            models.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Easy Diffusion returned an invalid model list.");
+        var diffusion = new List<string>();
+        var vae = new List<string>();
+        var encoders = new List<string>();
+        var upscalers = new List<string>();
+        foreach (var model in models.EnumerateArray())
+        {
+            if (model.ValueKind != JsonValueKind.Object || !model.TryGetProperty("model", out var id) ||
+                id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
+                !model.TryGetProperty("tags", out var tags) || tags.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Easy Diffusion returned a malformed model entry.");
+            foreach (var tag in tags.EnumerateArray())
+            {
+                if (tag.ValueKind != JsonValueKind.String)
+                    throw new InvalidDataException("Easy Diffusion returned a malformed model tag.");
+                var target = tag.GetString() switch
+                {
+                    "stable-diffusion" => diffusion,
+                    "vae" => vae,
+                    "text-encoder" => encoders,
+                    "realesrgan" => upscalers,
+                    _ => null
+                };
+                target?.Add(id.GetString()!);
+            }
+        }
+        static string[] Sorted(List<string> values) => values.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
+        return new ModelCatalog(Sorted(diffusion), Sorted(vae), Sorted(encoders), Sorted(upscalers));
+    }
+
     public Task<byte[]> FillAsync(Settings s, string prompt, string negative, byte[] image, byte[] mask, int width, int height, IProgress<string> progress, CancellationToken ct) =>
         RunAsync("render", new
         {
             prompt, negative_prompt = negative, width, height,
             init_image = DataUrl(image), mask = DataUrl(mask), prompt_strength = 0.8,
             num_outputs = 1, num_inference_steps = s.Steps, guidance_scale = s.Guidance,
-            seed = Random.Shared.Next(1, int.MaxValue), sampler_name = "euler_a",
-            use_stable_diffusion_model = s.Model, use_vae_model = "",
+            seed = Random.Shared.Next(1, int.MaxValue), sampler_name = s.Sampler, scheduler_name = s.Scheduler,
+            use_stable_diffusion_model = s.Model, use_vae_model = s.Vae,
+            use_text_encoder_model = s.TextEncoders.Count == 0 ? null : s.TextEncoders.ToArray(),
             enable_vae_tiling = true, vram_usage_level = "low", output_format = "png",
             stream_progress_updates = true, stream_image_progress = false,
             session_id = Guid.NewGuid().ToString("N")
@@ -71,6 +112,7 @@ public sealed class EasyDiffusionClient : IDisposable
                 if (item.TryGetProperty("step", out var step) && item.TryGetProperty("total_steps", out var total))
                     progress.Report($"Generating: step {step} of {total}...");
             }
+
             await Task.Delay(1000, timeout.Token);
         }
     }
@@ -124,3 +166,5 @@ public sealed class EasyDiffusionClient : IDisposable
     private static string DataUrl(byte[] bytes) => "data:image/png;base64," + Convert.ToBase64String(bytes);
     public void Dispose() => http.Dispose();
 }
+
+public sealed record ModelCatalog(string[] Diffusion, string[] Vae, string[] TextEncoders, string[] Upscalers);

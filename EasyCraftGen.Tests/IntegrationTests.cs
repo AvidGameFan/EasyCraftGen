@@ -21,6 +21,10 @@ public class IntegrationTests
                 Assert.Equal("data:image/png;base64,AQI=", root.GetProperty("mask").GetString());
                 Assert.Equal("data:image/png;base64,AQI=", root.GetProperty("init_image").GetString());
                 Assert.Equal("model", root.GetProperty("use_stable_diffusion_model").GetString());
+                Assert.Equal("euler", root.GetProperty("sampler_name").GetString());
+                Assert.Equal("simple", root.GetProperty("scheduler_name").GetString());
+                Assert.Equal("", root.GetProperty("use_vae_model").GetString());
+                Assert.Equal(JsonValueKind.Null, root.GetProperty("use_text_encoder_model").ValueKind);
                 return """{"stream":"/image/stream/123"}""";
             }
             return """{"step":1,"total_steps":2,"output":[{"path":"/image/tmp/123/0"}]}{"status":"succeeded","output":[{"data":"data:image/png;base64,AQI="}]}""";
@@ -28,6 +32,82 @@ public class IntegrationTests
         using var client = new EasyDiffusionClient("http://localhost:9000", handler);
         var bytes = await client.FillAsync(new Settings { Model = "model" }, "prompt", "", [1, 2], [1, 2], 512, 512, new Progress<string>(), CancellationToken.None);
         Assert.Equal(new byte[] { 1, 2 }, bytes);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FillSendsSamplerSchedulerVaeAndOrderedTextEncoders(int count)
+    {
+        var encoders = new[] { "clip_l", "t5xxl_fp16" }.Take(count).ToList();
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((_, body) =>
+        {
+            using var json = JsonDocument.Parse(body);
+            var root = json.RootElement;
+            Assert.Equal("dpmpp_2m", root.GetProperty("sampler_name").GetString());
+            Assert.Equal("karras", root.GetProperty("scheduler_name").GetString());
+            Assert.Equal("ae", root.GetProperty("use_vae_model").GetString());
+            var encoded = root.GetProperty("use_text_encoder_model");
+            if (count == 0) Assert.Equal(JsonValueKind.Null, encoded.ValueKind);
+            else Assert.Equal(encoders, encoded.EnumerateArray().Select(e => e.GetString()).ToArray());
+            return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
+        }));
+        var settings = new Settings { Sampler = "dpmpp_2m", Scheduler = "karras", Vae = "ae", TextEncoders = encoders };
+        await client.FillAsync(settings, "prompt", "", [1], [1], 512, 512, new Progress<string>(), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ModelCatalogUsesTagsAndPreservesModelIdentifiers()
+    {
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((request, _) =>
+        {
+            Assert.Equal("/get/models", request.RequestUri!.AbsolutePath);
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return """
+                {"models":[
+                  {"model":"folder/z-model","name":"A display label","tags":["stable-diffusion","sd_xl_base"]},
+                  {"model":"a-model","name":"A model","tags":["stable-diffusion"]},
+                  {"model":"ae","name":"AE","tags":["vae"]},
+                  {"model":"clip_l","name":"CLIP","tags":["text-encoder"]},
+                  {"model":"t5","name":"T5","tags":["text-encoder"]},
+                  {"model":"RealESRGAN_x4plus","name":"upscaler","tags":["realesrgan"]},
+                  {"model":"lora","name":"LoRA","tags":["lora"]},
+                  {"model":"clip_l","name":"duplicate","tags":["text-encoder"]}]}
+                """;
+        }));
+        var models = await client.GetModelsAsync(CancellationToken.None);
+        Assert.Equal(new[] { "a-model", "folder/z-model" }, models.Diffusion);
+        Assert.Equal(new[] { "ae" }, models.Vae);
+        Assert.Equal(new[] { "clip_l", "t5" }, models.TextEncoders);
+        Assert.Equal(new[] { "RealESRGAN_x4plus" }, models.Upscalers);
+    }
+
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"models":{}}""")]
+    [InlineData("""{"models":[{"model":"bad"}]}""")]
+    [InlineData("""{"models":[{"model":"bad","tags":[12]}]}""")]
+    public async Task ModelCatalogRejectsMalformedResponses(string response)
+    {
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((_, _) => response));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetModelsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public void SettingsDeserializeOlderFilesAndRoundTripNewOptions()
+    {
+        var old = JsonSerializer.Deserialize<Settings>("""{"Model":"old"}""")!;
+        Assert.Equal("euler", old.Sampler);
+        Assert.Equal("simple", old.Scheduler);
+        Assert.Empty(old.TextEncoders);
+        old.Sampler = "euler_a"; old.Scheduler = "karras"; old.Vae = "ae";
+        old.TextEncoders = ["clip_l", "t5xxl_fp16"];
+        var loaded = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(old))!;
+        Assert.Equal("euler_a", loaded.Sampler);
+        Assert.Equal("karras", loaded.Scheduler);
+        Assert.Equal("ae", loaded.Vae);
+        Assert.Equal(new[] { "clip_l", "t5xxl_fp16" }, loaded.TextEncoders);
     }
 
     [Fact]

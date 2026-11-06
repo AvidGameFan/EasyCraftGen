@@ -13,6 +13,18 @@
       <TextBox x:Name="NegativePrompt" PlaceholderText="Optional"/>
       <TextBlock Text="Diffusion model"/>
       <TextBox x:Name="Model" Text="sd-v1-5" PlaceholderText="Model name in Easy Diffusion"/>
+      <ComboBox x:Name="ModelChoices" PlaceholderText="Choose an available diffusion model" HorizontalAlignment="Stretch" SelectionChanged="ModelChoiceChanged"/>
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+        <StackPanel Spacing="5"><TextBlock Text="Sampler"/><ComboBox x:Name="Sampler" HorizontalAlignment="Stretch"/></StackPanel>
+        <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="Scheduler"/><ComboBox x:Name="Scheduler" HorizontalAlignment="Stretch"/></StackPanel>
+      </Grid>
+      <TextBlock Text="VAE (optional)"/>
+      <TextBox x:Name="Vae" PlaceholderText="Default / embedded"/>
+      <ComboBox x:Name="VaeChoices" PlaceholderText="Choose an available VAE" HorizontalAlignment="Stretch" SelectionChanged="VaeChoiceChanged"/>
+      <TextBlock Text="Text encoders (optional)"/>
+      <TextBox x:Name="TextEncoders" AcceptsReturn="True" Height="65" TextWrapping="NoWrap" PlaceholderText="One model name per line, in order"/>
+      <ComboBox x:Name="EncoderChoices" PlaceholderText="Add an available text encoder" HorizontalAlignment="Stretch" SelectionChanged="EncoderChoiceChanged"/>
+      <TextBlock Text="Choose encoders to add them, or edit the list above. Leave empty for the default." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
       <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
         <StackPanel Spacing="5"><TextBlock Text="Steps"/><NumericUpDown x:Name="Steps" Value="25" Minimum="1" Maximum="150" FormatString="0"/></StackPanel>
         <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="Guidance"/><NumericUpDown x:Name="Guidance" Value="7.5" Minimum="0" Maximum="30" Increment="0.5"/></StackPanel>
@@ -23,6 +35,7 @@
       <TextBlock Text="Upscale" FontWeight="SemiBold" FontSize="16"/>
       <TextBlock Text="Real-ESRGAN model"/>
       <TextBox x:Name="UpscaleModel" Text="RealESRGAN_x4plus"/>
+      <ComboBox x:Name="UpscaleChoices" PlaceholderText="Choose an available upscaler" HorizontalAlignment="Stretch" SelectionChanged="UpscaleChoiceChanged"/>
       <StackPanel Orientation="Horizontal" Spacing="10">
         <TextBlock Text="Scale" VerticalAlignment="Center"/>
         <ComboBox x:Name="Scale" SelectedIndex="0"><ComboBoxItem Content="2x"/><ComboBoxItem Content="4x"/></ComboBox>
@@ -33,6 +46,7 @@
         <StackPanel Spacing="7">
           <TextBlock Text="Easy Diffusion URL"/>
           <TextBox x:Name="ServerUrl" Text="http://127.0.0.1:9000"/>
+          <Button x:Name="RefreshModelsButton" Content="Refresh model lists" Click="RefreshModelsClick"/>
           <TextBlock Text="PhotoCraft control port"/>
           <NumericUpDown x:Name="Port" Value="7878" Minimum="1" Maximum="65535" FormatString="0"/>
           <TextBlock Text="PhotoCraft token file"/>

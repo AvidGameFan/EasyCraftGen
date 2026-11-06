@@ -7,19 +7,51 @@ namespace EasyCraftGen;
 public partial class MainWindow : Window
 {
     private CancellationTokenSource? job;
+    private static readonly string[] SamplerOptions =
+    [
+        "euler", "euler_a", "ddim", "ddim_cfgpp", "plms", "heun", "heun_pp2", "dpm2", "dpm2_a",
+        "dpm_fast", "dpm_adaptive", "lms", "dpm_solver_stability", "dpmpp_2s_a", "dpmpp_2m",
+        "dpmpp_2m_v2", "dpmpp_2m_sde", "dpmpp_2m_sde_heun", "dpmpp_3m_sde", "dpmpp_sde",
+        "restart", "ipndm", "ipndm_v", "ddpm", "deis", "lcm", "forge_flux_realistic",
+        "forge_flux_realistic_slow", "unipc_snr", "unipc_tu", "unipc_snr_2", "unipc_tu_2", "unipc_tq", "tcd"
+    ];
+    private static readonly string[] SchedulerOptions =
+    [
+        "simple", "automatic", "uniform", "karras", "exponential", "polyexponential", "sgm_uniform", "kl_optimal",
+        "normal", "ddim", "beta", "turbo", "align_your_steps", "align_your_steps_GITS", "align_your_steps_11", "align_your_steps_32"
+    ];
 
     public MainWindow()
     {
         InitializeComponent();
         try { ApplySettings(Settings.Load()); }
         catch (Exception ex) { Status.Text = $"Could not load settings: {ex.Message}"; ApplySettings(new Settings()); }
+        ServerUrl.TextChanged += (_, _) => ClearModelChoices();
+        Opened += async (_, _) => await RefreshModelsAsync();
+    }
+
+    private void ClearModelChoices()
+    {
+        ModelChoices.ItemsSource = null;
+        VaeChoices.ItemsSource = null;
+        EncoderChoices.ItemsSource = null;
+        UpscaleChoices.ItemsSource = null;
     }
 
     private void ApplySettings(Settings s)
     {
         ServerUrl.Text = s.ServerUrl; Port.Value = s.Port; TokenPath.Text = s.TokenPath; ExchangePath.Text = s.ExchangePath;
         Model.Text = s.Model; UpscaleModel.Text = s.UpscaleModel; Steps.Value = s.Steps; Guidance.Value = (decimal)s.Guidance;
+        Vae.Text = s.Vae; TextEncoders.Text = string.Join(Environment.NewLine, s.TextEncoders);
+        SetOptions(Sampler, SamplerOptions, s.Sampler);
+        SetOptions(Scheduler, SchedulerOptions, s.Scheduler);
         Scale.SelectedIndex = s.Scale == 4 ? 1 : 0; OnTop.IsChecked = s.OnTop; Topmost = s.OnTop;
+    }
+
+    private static void SetOptions(ComboBox combo, string[] options, string selected)
+    {
+        combo.ItemsSource = options.Contains(selected, StringComparer.Ordinal) ? options : [.. options, selected];
+        combo.SelectedItem = selected;
     }
 
     private Settings ReadSettings()
@@ -29,6 +61,9 @@ public partial class MainWindow : Window
             ServerUrl = ServerUrl.Text?.Trim() ?? "", Port = (int)(Port.Value ?? 0),
             TokenPath = TokenPath.Text?.Trim() ?? "", ExchangePath = ExchangePath.Text?.Trim() ?? "",
             Model = Model.Text?.Trim() ?? "", UpscaleModel = UpscaleModel.Text?.Trim() ?? "",
+            Sampler = Sampler.SelectedItem as string ?? "", Scheduler = Scheduler.SelectedItem as string ?? "",
+            Vae = Vae.Text?.Trim() ?? "",
+            TextEncoders = (TextEncoders.Text ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
             Steps = (int)(Steps.Value ?? 0), Guidance = (double)(Guidance.Value ?? 0),
             Scale = Scale.SelectedIndex == 1 ? 4 : 2, OnTop = OnTop.IsChecked == true
         };
@@ -38,6 +73,58 @@ public partial class MainWindow : Window
 
     private void OnTopChanged(object? sender, RoutedEventArgs e) => Topmost = (sender as CheckBox)?.IsChecked == true;
     private void CancelClick(object? sender, RoutedEventArgs e) => job?.Cancel();
+    private void ModelChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(ModelChoices, Model);
+    private void VaeChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(VaeChoices, Vae);
+    private void UpscaleChoiceChanged(object? sender, SelectionChangedEventArgs e) => ApplyChoice(UpscaleChoices, UpscaleModel);
+    private static void ApplyChoice(ComboBox choice, TextBox target)
+    {
+        if (choice.SelectedItem is string value) { target.Text = value; choice.SelectedIndex = -1; }
+    }
+
+    private void EncoderChoiceChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (EncoderChoices.SelectedItem is not string value) return;
+        var existing = (TextEncoders.Text ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!existing.Contains(value, StringComparer.Ordinal))
+            TextEncoders.Text = string.Join(Environment.NewLine, existing.Append(value));
+        EncoderChoices.SelectedIndex = -1;
+    }
+
+    private async void RefreshModelsClick(object? sender, RoutedEventArgs e) => await RefreshModelsAsync();
+
+    private async Task RefreshModelsAsync()
+    {
+        if (job is not null) return;
+        job = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = false;
+        CancelButton.IsEnabled = true;
+        try
+        {
+            var url = ServerUrl.Text?.Trim() ?? "";
+            Settings.ValidateServerUrl(url);
+            Status.Text = "Loading models from Easy Diffusion...";
+            using var easy = new EasyDiffusionClient(url);
+            var catalog = await easy.GetModelsAsync(job.Token);
+            if (!string.Equals(url, ServerUrl.Text?.Trim(), StringComparison.Ordinal))
+            {
+                Status.Text = "The Easy Diffusion URL changed; refresh the model lists for the new server.";
+                return;
+            }
+            ModelChoices.ItemsSource = catalog.Diffusion;
+            VaeChoices.ItemsSource = catalog.Vae;
+            EncoderChoices.ItemsSource = catalog.TextEncoders;
+            UpscaleChoices.ItemsSource = catalog.Upscalers;
+            Status.Text = $"Loaded {catalog.Diffusion.Length} diffusion models, {catalog.Vae.Length} VAEs, {catalog.TextEncoders.Length} text encoders, and {catalog.Upscalers.Length} upscalers. Some server entries may be download suggestions.";
+        }
+        catch (OperationCanceledException) { Status.Text = "Model refresh cancelled or timed out. Existing entries are unchanged."; }
+        catch (Exception ex) { Status.Text = $"Could not load model lists: {ex.Message}"; }
+        finally
+        {
+            job.Dispose(); job = null;
+            FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = true;
+            CancelButton.IsEnabled = false;
+        }
+    }
     private void SaveClick(object? sender, RoutedEventArgs e)
     {
         try { ReadSettings().Save(); Status.Text = "Settings saved."; }
@@ -112,11 +199,11 @@ public partial class MainWindow : Window
     {
         if (job is not null) return;
         job = new CancellationTokenSource();
-        FillButton.IsEnabled = UpscaleButton.IsEnabled = false; CancelButton.IsEnabled = true;
+        FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = false; CancelButton.IsEnabled = true;
         try { await action(ReadSettings(), job.Token); }
         catch (OperationCanceledException) when (job.IsCancellationRequested) { Status.Text = "Cancelled locally. Easy Diffusion may still finish its queued job."; }
         catch (OperationCanceledException) { Status.Text = "The request timed out. Easy Diffusion may still finish its queued job."; }
         catch (Exception ex) { Status.Text = ex.Message; }
-        finally { job.Dispose(); job = null; FillButton.IsEnabled = UpscaleButton.IsEnabled = true; CancelButton.IsEnabled = false; }
+        finally { job.Dispose(); job = null; FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = true; CancelButton.IsEnabled = false; }
     }
 }
