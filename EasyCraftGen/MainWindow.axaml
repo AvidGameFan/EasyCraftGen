@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="EasyCraftGen.MainWindow"
+        Title="EasyCraftGen" Width="380" Height="820" MinWidth="320" MinHeight="480"
+        Topmost="True">
+  <ScrollViewer>
+    <StackPanel Margin="18" Spacing="10">
+      <TextBlock Text="EasyCraftGen" FontSize="24" FontWeight="SemiBold"/>
+      <TextBlock Text="PhotoCraft + Easy Diffusion" Opacity="0.7"/>
+      <TextBlock Text="Prompt"/>
+      <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" Height="70" PlaceholderText="Describe the fill"/>
+      <TextBlock Text="Negative prompt"/>
+      <TextBox x:Name="NegativePrompt" PlaceholderText="Optional"/>
+      <TextBlock Text="Diffusion model"/>
+      <TextBox x:Name="Model" Text="sd-v1-5" PlaceholderText="Model name in Easy Diffusion"/>
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+        <StackPanel Spacing="5"><TextBlock Text="Steps"/><NumericUpDown x:Name="Steps" Value="25" Minimum="1" Maximum="150" FormatString="0"/></StackPanel>
+        <StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="Guidance"/><NumericUpDown x:Name="Guidance" Value="7.5" Minimum="0" Maximum="30" Increment="0.5"/></StackPanel>
+      </Grid>
+      <TextBlock Text="Fill uses the selection's bounding rectangle for generation; the actual selection masks the new layer." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
+      <Button x:Name="FillButton" Content="Generate fill" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="FillClick"/>
+      <Separator/>
+      <TextBlock Text="Upscale" FontWeight="SemiBold" FontSize="16"/>
+      <TextBlock Text="Real-ESRGAN model"/>
+      <TextBox x:Name="UpscaleModel" Text="RealESRGAN_x4plus"/>
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <TextBlock Text="Scale" VerticalAlignment="Center"/>
+        <ComboBox x:Name="Scale" SelectedIndex="0"><ComboBoxItem Content="2x"/><ComboBoxItem Content="4x"/></ComboBox>
+      </StackPanel>
+      <Button x:Name="UpscaleButton" Content="Upscale to new document" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="UpscaleClick"/>
+      <Separator/>
+      <Expander Header="Connection and settings" IsExpanded="True">
+        <StackPanel Spacing="7">
+          <TextBlock Text="Easy Diffusion URL"/>
+          <TextBox x:Name="ServerUrl" Text="http://127.0.0.1:9000"/>
+          <TextBlock Text="PhotoCraft control port"/>
+          <NumericUpDown x:Name="Port" Value="7878" Minimum="1" Maximum="65535" FormatString="0"/>
+          <TextBlock Text="PhotoCraft token file"/>
+          <TextBox x:Name="TokenPath"/>
+          <TextBlock Text="PhotoCraft exchange directory"/>
+          <TextBox x:Name="ExchangePath"/>
+          <CheckBox x:Name="OnTop" IsChecked="True" Content="Keep window on top" IsCheckedChanged="OnTopChanged"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="Test connections" Click="TestClick"/>
+            <Button Content="Save settings" Click="SaveClick"/>
+          </StackPanel>
+        </StackPanel>
+      </Expander>
+      <Button x:Name="CancelButton" Content="Cancel" IsEnabled="False" Click="CancelClick"/>
+      <TextBlock x:Name="Status" Text="Configure PhotoCraft's control channel before connecting." TextWrapping="Wrap"/>
+    </StackPanel>
+  </ScrollViewer>
+</Window>
