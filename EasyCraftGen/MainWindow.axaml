@@ -7,8 +7,10 @@
     <StackPanel Margin="18" Spacing="10">
       <TextBlock Text="EasyCraftGen" FontSize="24" FontWeight="SemiBold"/>
       <TextBlock Text="PhotoCraft + Easy Diffusion" Opacity="0.7"/>
+      <TextBlock Text="Prompt starter (optional)"/>
+      <ComboBox x:Name="PromptStarters" HorizontalAlignment="Stretch" PlaceholderText="Choose a starter to add to your prompt" AutomationProperties.Name="Prompt starter" SelectionChanged="PromptStarterChanged"/>
       <TextBlock Text="Prompt"/>
-      <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" Height="70" PlaceholderText="Describe the fill"/>
+      <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" Height="70" PlaceholderText="Describe what to create, change, or remove"/>
       <TextBlock Text="Negative prompt"/>
       <TextBox x:Name="NegativePrompt" PlaceholderText="Optional"/>
       <TextBlock Text="Diffusion model"/>
@@ -31,16 +33,16 @@
       </Grid>
       <Expander Header="Advanced">
         <StackPanel Spacing="8">
-          <TextBlock Text="Fill resolution (megapixels)"/>
-          <ComboBox x:Name="FillMegapixels" HorizontalAlignment="Stretch" AutomationProperties.Name="Fill resolution in megapixels"/>
+          <TextBlock Text="Generation resolution (megapixels)"/>
+          <ComboBox x:Name="FillMegapixels" HorizontalAlignment="Stretch" AutomationProperties.Name="Generation resolution in megapixels"/>
           <TextBlock Text="Higher resolutions use more VRAM and can take longer. Smaller documents are not enlarged to reach the target." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
-          <TextBlock Text="Fill pixel step"/>
-          <ComboBox x:Name="FillPixelStep" HorizontalAlignment="Stretch" AutomationProperties.Name="Fill pixel step"/>
+          <TextBlock Text="Generation pixel step"/>
+          <ComboBox x:Name="FillPixelStep" HorizontalAlignment="Stretch" AutomationProperties.Name="Generation pixel step"/>
           <TextBlock Text="Dimensions are rounded to the selected step. Easy Diffusion or the model may require further alignment." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
         </StackPanel>
       </Expander>
-      <TextBlock Text="Fill uses the selection's bounding rectangle for generation; the actual selection masks the new layer." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
-      <Button x:Name="FillButton" Content="Generate fill" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="FillClick"/>
+      <TextBlock Text="With a selection, its bounding rectangle masks generation and the actual selection masks the new layer. Without a selection, the whole image is edited. Results depend on the model." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
+      <Button x:Name="FillButton" Content="Generate fill / edit" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="FillClick"/>
       <Separator/>
       <TextBlock Text="Upscale" FontWeight="SemiBold" FontSize="16"/>
       <TextBlock Text="Real-ESRGAN model"/>

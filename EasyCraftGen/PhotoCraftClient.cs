@@ -99,8 +99,8 @@ public sealed class PhotoCraftClient : IDisposable
 
     public async Task PlaceAsync(string name, DocumentInfo target, CancellationToken ct)
     {
-        string channel = $"easycraftgen-{Guid.NewGuid():N}";
-        await ExecuteAsync("select.saveSelection", new { name = channel }, ct);
+        string? channel = target.Selection is null ? null : $"easycraftgen-{Guid.NewGuid():N}";
+        if (channel is not null) await ExecuteAsync("select.saveSelection", new { name = channel }, ct);
         try
         {
             var opened = await CallAsync("app.open", new { path = name }, ct);
@@ -115,15 +115,21 @@ public sealed class PhotoCraftClient : IDisposable
             if (!current.SameDocument(target))
                 throw new InvalidOperationException("PhotoCraft changed documents; the result was not pasted.");
             await ExecuteAsync("edit.pasteSpecial.pasteInPlace", null, ct);
-            await ExecuteAsync("select.loadSelection", new { channel }, ct);
-            await ExecuteAsync("layer.layerMask.revealSelection", null, ct);
-            await ExecuteAsync("layer.renameLayer", new { name = "Generative Fill" }, ct);
+            if (channel is not null)
+            {
+                await ExecuteAsync("select.loadSelection", new { channel }, ct);
+                await ExecuteAsync("layer.layerMask.revealSelection", null, ct);
+            }
+            await ExecuteAsync("layer.renameLayer", new { name = channel is null ? "Generative Edit" : "Generative Fill" }, ct);
         }
         finally
         {
-            var current = await InspectAsync(CancellationToken.None);
-            if (current.SameDocument(target))
-                await ExecuteAsync("channel.delete", new { channel }, CancellationToken.None);
+            if (channel is not null)
+            {
+                var current = await InspectAsync(CancellationToken.None);
+                if (current.SameDocument(target))
+                    await ExecuteAsync("channel.delete", new { channel }, CancellationToken.None);
+            }
         }
     }
 

@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        PromptStarters.ItemsSource = new[] { "Enhance ", "Colorize ", "Harmonize ", "Create ", "Change the style to ", "Remove " };
         try { ApplySettings(Settings.Load()); }
         catch (Exception ex) { Status.Text = $"Could not load settings: {ex.Message}"; ApplySettings(new Settings()); }
         ServerUrl.TextChanged += (_, _) => ClearModelChoices();
@@ -95,6 +96,16 @@ public partial class MainWindow : Window
         EncoderChoices.SelectedIndex = -1;
     }
 
+    private void PromptStarterChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (PromptStarters.SelectedItem is not string starter) return;
+        var text = Prompt.Text ?? "";
+        Prompt.Text = text + (text.Length > 0 && !char.IsWhiteSpace(text[^1]) ? " " : "") + starter;
+        PromptStarters.SelectedIndex = -1;
+        Prompt.Focus();
+        Prompt.CaretIndex = Prompt.Text.Length;
+    }
+
     private async void RefreshModelsClick(object? sender, RoutedEventArgs e) => await RefreshModelsAsync();
 
     private async Task RefreshModelsAsync()
@@ -149,14 +160,14 @@ public partial class MainWindow : Window
     {
         var prompt = Prompt.Text?.Trim() ?? "";
         var negative = NegativePrompt.Text?.Trim() ?? "";
-        if (string.IsNullOrEmpty(prompt)) throw new ArgumentException("Enter a prompt for the fill.");
+        if (string.IsNullOrEmpty(prompt)) throw new ArgumentException("Enter a prompt describing what to create, change, or remove.");
         Status.Text = "Reading PhotoCraft document...";
         using var pc = await PhotoCraftClient.ConnectAsync(s, ct);
         var doc = await pc.InspectAsync(ct);
         var original = await pc.ExportAsync(s.ExchangePath, ct);
         var prepared = ImageTools.PrepareFill(original, doc, s.FillMegapixels, s.FillPixelStep);
         using var easy = new EasyDiffusionClient(s.ServerUrl);
-        Status.Text = $"Generating fill (requested {prepared.Width} x {prepared.Height}) in Easy Diffusion...";
+        Status.Text = $"Generating {(prepared.Mask is null ? "edit" : "fill")} (requested {prepared.Width} x {prepared.Height}) in Easy Diffusion...";
         var generated = await easy.FillAsync(s, prompt, negative, prepared.Source, prepared.Mask, prepared.Width, prepared.Height,
             new Progress<string>(message => Status.Text = message), ct);
         generated = ImageTools.Resize(generated, doc.Width, doc.Height);
@@ -170,12 +181,12 @@ public partial class MainWindow : Window
         var name = $"easycraftgen-fill-{Guid.NewGuid():N}.png";
         var path = Path.Combine(s.ExchangePath, name);
         await File.WriteAllBytesAsync(path, generated, ct);
-        Status.Text = "Placing masked layer in PhotoCraft...";
+        Status.Text = prepared.Mask is null ? "Placing edited layer in PhotoCraft..." : "Placing masked layer in PhotoCraft...";
         CancelButton.IsEnabled = false;
         try { await pc.PlaceAsync(name, doc, CancellationToken.None); }
         catch (Exception ex) { throw new InvalidOperationException($"Placement failed. Result saved at {path}. PhotoCraft may contain partial changes: {ex.Message}", ex); }
         File.Delete(path);
-        Status.Text = "Fill added as a masked layer.";
+        Status.Text = prepared.Mask is null ? "Edit added as a new layer." : "Fill added as a masked layer.";
     });
 
     private async void UpscaleClick(object? sender, RoutedEventArgs e) => await RunAsync(async (s, ct) =>

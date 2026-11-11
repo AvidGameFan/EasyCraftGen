@@ -34,6 +34,51 @@ public class IntegrationTests
         Assert.Equal(new byte[] { 1, 2 }, bytes);
     }
 
+    [Fact]
+    public async Task WholeImageEditSendsImageWithoutMask()
+    {
+        using var bitmap = new SKBitmap(128, 64);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 64, null), 1);
+        Assert.Null(prepared.Mask);
+        using var source = SKBitmap.Decode(prepared.Source);
+        Assert.Equal((128, 64), (source.Width, source.Height));
+        Assert.Equal(SKColors.Red, source.GetPixel(0, 0));
+        Assert.Equal(SKColors.Red, source.GetPixel(127, 63));
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((request, body) =>
+        {
+            using var json = JsonDocument.Parse(body);
+            var root = json.RootElement;
+            Assert.Equal("/render", request.RequestUri!.AbsolutePath);
+            Assert.Equal("Remove the car", root.GetProperty("prompt").GetString());
+            Assert.Equal("data:image/png;base64," + Convert.ToBase64String(prepared.Source), root.GetProperty("init_image").GetString());
+            Assert.False(root.TryGetProperty("mask", out _));
+            Assert.Equal(128, root.GetProperty("width").GetInt32());
+            Assert.Equal(64, root.GetProperty("height").GetInt32());
+            return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
+        }));
+        Assert.Equal(new byte[] { 1, 2 }, await client.FillAsync(new Settings(), "Remove the car", "", prepared.Source,
+            prepared.Mask, prepared.Width, prepared.Height, new Progress<string>(), CancellationToken.None));
+    }
+
+    [Fact]
+    public void WholeImageEditUsesResolutionSettingsAndWhiteForTransparency()
+    {
+        using var bitmap = new SKBitmap(2048, 1024);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Transparent);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 2048, 1024, null);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1);
+        Assert.Null(prepared.Mask);
+        Assert.Equal((1414, 707), (prepared.Width, prepared.Height));
+        using var source = SKBitmap.Decode(prepared.Source);
+        Assert.Equal((1414, 707), (source.Width, source.Height));
+        Assert.Equal(SKColors.White, source.GetPixel(0, 0));
+        Assert.False(doc.SameSelection(doc with { Selection = [1, 2, 3, 4] }));
+        Assert.True(doc.SameSelection(doc with { }));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -158,7 +203,8 @@ public class IntegrationTests
         Assert.Equal(SKColors.Black, mask.GetPixel(10, 10));
         Assert.Equal(SKColors.White, mask.GetPixel(40, 20));
         Assert.Equal(SKColors.Black, mask.GetPixel(40, 80));
-        Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, null), 1));
+        Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [1, 2, 0, 4]), 1));
+        Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [1, 2, 3]), 1));
     }
 
     [Theory]
@@ -362,8 +408,10 @@ public class IntegrationTests
         }
     }
 
-    [Fact]
-    public async Task PlacementPreservesSelectionAndMasksPastedLayer()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PlacementMasksOnlyWhenSelectionExists(bool hasSelection)
     {
         var tokenPath = Path.GetTempFileName();
         await File.WriteAllTextAsync(tokenPath, "secret");
@@ -393,12 +441,13 @@ public class IntegrationTests
                     var args = parameters.GetProperty("params");
                     if (command == "select.saveSelection") channel = args.GetProperty("name").GetString();
                     if (command is "select.loadSelection" or "channel.delete") Assert.Equal(channel, args.GetProperty("channel").GetString());
+                    if (command == "layer.renameLayer") Assert.Equal(hasSelection ? "Generative Fill" : "Generative Edit", args.GetProperty("name").GetString());
                     if (command == "file.close") temporary = false;
                     if (command == "document.inspect") result = new
                     {
                         name = temporary ? "result.png" : "original",
                         path = temporary ? "result.png" : "original.png",
-                        width = 128, height = 64, selectionBounds = new[] { 4, 5, 10, 20 }
+                        width = 128, height = 64, selectionBounds = hasSelection ? new[] { 4, 5, 10, 20 } : null
                     };
                 }
                 await writer.WriteLineAsync(JsonSerializer.Serialize(new { id = root.GetProperty("id").GetInt32(), ok = true, result }));
@@ -407,14 +456,19 @@ public class IntegrationTests
         try
         {
             using (var client = await PhotoCraftClient.ConnectAsync(new Settings { Port = port, TokenPath = tokenPath }, CancellationToken.None))
-                await client.PlaceAsync("result.png", new DocumentInfo("original", "original.png", 128, 64, [4, 5, 10, 20]), CancellationToken.None);
+                await client.PlaceAsync("result.png", new DocumentInfo("original", "original.png", 128, 64, hasSelection ? [4, 5, 10, 20] : null), CancellationToken.None);
             await server;
-            Assert.Equal(new[]
+            var expected = hasSelection ? new[]
             {
                 "select.saveSelection", "document.inspect", "select.all", "edit.copy", "file.close",
                 "document.inspect", "edit.pasteSpecial.pasteInPlace", "select.loadSelection",
                 "layer.layerMask.revealSelection", "layer.renameLayer", "document.inspect", "channel.delete"
-            }, commands);
+            } : new[]
+            {
+                "document.inspect", "select.all", "edit.copy", "file.close",
+                "document.inspect", "edit.pasteSpecial.pasteInPlace", "layer.renameLayer"
+            };
+            Assert.Equal(expected, commands);
         }
         finally { listener.Stop(); File.Delete(tokenPath); }
     }

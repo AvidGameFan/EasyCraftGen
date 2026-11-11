@@ -62,19 +62,23 @@ public sealed class EasyDiffusionClient : IDisposable
         return new ModelCatalog(Sorted(diffusion), Sorted(vae), Sorted(encoders), Sorted(upscalers));
     }
 
-    public Task<byte[]> FillAsync(Settings s, string prompt, string negative, byte[] image, byte[] mask, int width, int height, IProgress<string> progress, CancellationToken ct) =>
-        RunAsync("render", new
+    public Task<byte[]> FillAsync(Settings s, string prompt, string negative, byte[] image, byte[]? mask, int width, int height, IProgress<string> progress, CancellationToken ct)
+    {
+        var payload = new Dictionary<string, object?>
         {
-            prompt, negative_prompt = negative, width, height,
-            init_image = DataUrl(image), mask = DataUrl(mask), prompt_strength = 0.8,
-            num_outputs = 1, num_inference_steps = s.Steps, guidance_scale = s.Guidance,
-            seed = Random.Shared.Next(1, int.MaxValue), sampler_name = s.Sampler, scheduler_name = s.Scheduler,
-            use_stable_diffusion_model = s.Model, use_vae_model = s.Vae,
-            use_text_encoder_model = s.TextEncoders.Count == 0 ? null : s.TextEncoders.ToArray(),
-            enable_vae_tiling = true, vram_usage_level = "low", output_format = "png",
-            stream_progress_updates = true, stream_image_progress = false,
-            session_id = Guid.NewGuid().ToString("N")
-        }, progress, ct);
+            ["prompt"] = prompt, ["negative_prompt"] = negative, ["width"] = width, ["height"] = height,
+            ["init_image"] = DataUrl(image), ["prompt_strength"] = 0.8,
+            ["num_outputs"] = 1, ["num_inference_steps"] = s.Steps, ["guidance_scale"] = s.Guidance,
+            ["seed"] = Random.Shared.Next(1, int.MaxValue), ["sampler_name"] = s.Sampler, ["scheduler_name"] = s.Scheduler,
+            ["use_stable_diffusion_model"] = s.Model, ["use_vae_model"] = s.Vae,
+            ["use_text_encoder_model"] = s.TextEncoders.Count == 0 ? null : s.TextEncoders.ToArray(),
+            ["enable_vae_tiling"] = true, ["vram_usage_level"] = "low", ["output_format"] = "png",
+            ["stream_progress_updates"] = true, ["stream_image_progress"] = false,
+            ["session_id"] = Guid.NewGuid().ToString("N")
+        };
+        if (mask is not null) payload["mask"] = DataUrl(mask);
+        return RunAsync("render", payload, progress, ct);
+    }
 
     public Task<byte[]> UpscaleAsync(Settings s, byte[] image, IProgress<string> progress, CancellationToken ct) =>
         RunAsync("filter", new
