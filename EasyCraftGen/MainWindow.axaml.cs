@@ -48,6 +48,7 @@ public partial class MainWindow : Window
         FillMegapixels.SelectedItem = s.FillMegapixels;
         FillPixelStep.ItemsSource = new[] { 64, 16, 1 };
         FillPixelStep.SelectedItem = s.FillPixelStep;
+        OptimizeSelection.IsChecked = s.OptimizeSelection;
         SetOptions(Sampler, SamplerOptions, s.Sampler);
         SetOptions(Scheduler, SchedulerOptions, s.Scheduler);
         Scale.SelectedIndex = s.Scale == 4 ? 1 : 0; OnTop.IsChecked = s.OnTop; Topmost = s.OnTop;
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
             Steps = (int)(Steps.Value ?? 0), Guidance = (double)(Guidance.Value ?? 0),
             FillMegapixels = FillMegapixels.SelectedItem is int megapixels ? megapixels : 0,
             FillPixelStep = FillPixelStep.SelectedItem is int pixelStep ? pixelStep : 0,
+            OptimizeSelection = OptimizeSelection.IsChecked == true,
             Scale = Scale.SelectedIndex == 1 ? 4 : 2, OnTop = OnTop.IsChecked == true
         };
         s.Validate();
@@ -165,12 +167,12 @@ public partial class MainWindow : Window
         using var pc = await PhotoCraftClient.ConnectAsync(s, ct);
         var doc = await pc.InspectAsync(ct);
         var original = await pc.ExportAsync(s.ExchangePath, ct);
-        var prepared = ImageTools.PrepareFill(original, doc, s.FillMegapixels, s.FillPixelStep);
+        var prepared = ImageTools.PrepareFill(original, doc, s.FillMegapixels, s.FillPixelStep, s.OptimizeSelection);
         using var easy = new EasyDiffusionClient(s.ServerUrl);
         Status.Text = $"Generating {(prepared.Mask is null ? "edit" : "fill")} (requested {prepared.Width} x {prepared.Height}) in Easy Diffusion...";
         var generated = await easy.FillAsync(s, prompt, negative, prepared.Source, prepared.Mask, prepared.Width, prepared.Height,
             new Progress<string>(message => Status.Text = message), ct);
-        generated = ImageTools.Resize(generated, doc.Width, doc.Height);
+        generated = ImageTools.RestoreFill(generated, doc, prepared);
         ct.ThrowIfCancellationRequested();
         var current = await pc.InspectAsync(ct);
         if (!doc.SameDocument(current) || !doc.SameSelection(current))

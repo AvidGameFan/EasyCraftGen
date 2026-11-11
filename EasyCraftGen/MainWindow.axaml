@@ -39,6 +39,8 @@
           <TextBlock Text="Generation pixel step"/>
           <ComboBox x:Name="FillPixelStep" HorizontalAlignment="Stretch" AutomationProperties.Name="Generation pixel step"/>
           <TextBlock Text="Dimensions are rounded to the selected step. Easy Diffusion or the model may require further alignment." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
+          <CheckBox x:Name="OptimizeSelection" Content="Optimize selection for low VRAM"/>
+          <TextBlock Text="Process the selection with at least 64 pixels of available context. Requests are at least 384 pixels in each dimension." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
         </StackPanel>
       </Expander>
       <TextBlock Text="With a selection, its bounding rectangle masks generation and the actual selection masks the new layer. Without a selection, the whole image is edited. Results depend on the model." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>

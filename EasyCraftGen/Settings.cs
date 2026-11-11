@@ -21,6 +21,7 @@ public sealed class Settings
     public double Guidance { get; set; } = 7.5;
     public int FillMegapixels { get; set; } = 1;
     public int FillPixelStep { get; set; } = 64;
+    public bool OptimizeSelection { get; set; }
     public int Scale { get; set; } = 2;
     public bool OnTop { get; set; } = true;
 

@@ -43,9 +43,10 @@ public class IntegrationTests
         var prepared = ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 64, null), 1);
         Assert.Null(prepared.Mask);
         using var source = SKBitmap.Decode(prepared.Source);
-        Assert.Equal((128, 64), (source.Width, source.Height));
-        Assert.Equal(SKColors.Red, source.GetPixel(0, 0));
-        Assert.Equal(SKColors.Red, source.GetPixel(127, 63));
+        Assert.Equal((384, 384), (source.Width, source.Height));
+        Assert.Equal(SKColors.White, source.GetPixel(0, 0));
+        Assert.Equal(SKColors.Red, source.GetPixel(128, 160));
+        Assert.Equal(SKColors.Red, source.GetPixel(255, 223));
         using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((request, body) =>
         {
             using var json = JsonDocument.Parse(body);
@@ -54,8 +55,8 @@ public class IntegrationTests
             Assert.Equal("Remove the car", root.GetProperty("prompt").GetString());
             Assert.Equal("data:image/png;base64," + Convert.ToBase64String(prepared.Source), root.GetProperty("init_image").GetString());
             Assert.False(root.TryGetProperty("mask", out _));
-            Assert.Equal(128, root.GetProperty("width").GetInt32());
-            Assert.Equal(64, root.GetProperty("height").GetInt32());
+            Assert.Equal(384, root.GetProperty("width").GetInt32());
+            Assert.Equal(384, root.GetProperty("height").GetInt32());
             return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
         }));
         Assert.Equal(new byte[] { 1, 2 }, await client.FillAsync(new Settings(), "Remove the car", "", prepared.Source,
@@ -147,15 +148,17 @@ public class IntegrationTests
         Assert.Equal("simple", old.Scheduler);
         Assert.Equal(1, old.FillMegapixels);
         Assert.Equal(64, old.FillPixelStep);
+        Assert.False(old.OptimizeSelection);
         Assert.Empty(old.TextEncoders);
         old.Sampler = "euler_a"; old.Scheduler = "karras"; old.Vae = "ae"; old.FillMegapixels = 8; old.FillPixelStep = 16;
-        old.TextEncoders = ["clip_l", "t5xxl_fp16"];
+        old.TextEncoders = ["clip_l", "t5xxl_fp16"]; old.OptimizeSelection = true;
         var loaded = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(old))!;
         Assert.Equal("euler_a", loaded.Sampler);
         Assert.Equal("karras", loaded.Scheduler);
         Assert.Equal("ae", loaded.Vae);
         Assert.Equal(8, loaded.FillMegapixels);
         Assert.Equal(16, loaded.FillPixelStep);
+        Assert.True(loaded.OptimizeSelection);
         Assert.Equal(new[] { "clip_l", "t5xxl_fp16" }, loaded.TextEncoders);
     }
 
@@ -199,10 +202,10 @@ public class IntegrationTests
         using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
         var data = ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [32, 16, 200, 48]), 1);
         using var mask = SKBitmap.Decode(data.Mask);
-        Assert.Equal((128, 128), (data.Width, data.Height));
+        Assert.Equal((384, 384), (data.Width, data.Height));
         Assert.Equal(SKColors.Black, mask.GetPixel(10, 10));
-        Assert.Equal(SKColors.White, mask.GetPixel(40, 20));
-        Assert.Equal(SKColors.Black, mask.GetPixel(40, 80));
+        Assert.Equal(SKColors.White, mask.GetPixel(168, 148));
+        Assert.Equal(SKColors.Black, mask.GetPixel(168, 208));
         Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [1, 2, 0, 4]), 1));
         Assert.Throws<InvalidOperationException>(() => ImageTools.PrepareFill(encoded.ToArray(), new DocumentInfo("test", "", 128, 128, [1, 2, 3]), 1));
     }
@@ -244,7 +247,8 @@ public class IntegrationTests
         using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
         var doc = new DocumentInfo("test", "", 128, 64, [0, 0, 64, 64]);
         var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 8);
-        Assert.Equal((128, 64), (prepared.Width, prepared.Height));
+        Assert.Equal((384, 384), (prepared.Width, prepared.Height));
+        Assert.Equal(new SKRect(128, 160, 256, 224), prepared.Content);
         Assert.Throws<ArgumentOutOfRangeException>(() => ImageTools.PrepareFill(encoded.ToArray(), doc, 3));
         Assert.Throws<ArgumentException>(() => new Settings { FillMegapixels = 3 }.Validate());
     }
@@ -314,11 +318,136 @@ public class IntegrationTests
         using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
         var doc = new DocumentInfo("test", "", 5, 7, [0, 0, 5, 7]);
         var native = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1);
-        Assert.Equal((5, 7), (native.Width, native.Height));
+        Assert.Equal((384, 384), (native.Width, native.Height));
+        Assert.Equal(new SKRect(189, 188, 194, 195), native.Content);
         var small = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 16);
-        Assert.Equal((16, 16), (small.Width, small.Height));
+        Assert.Equal((384, 384), (small.Width, small.Height));
+        Assert.Equal(new SKRect(184, 184, 200, 200), small.Content);
         Assert.Throws<ArgumentOutOfRangeException>(() => ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 8));
         Assert.Throws<ArgumentException>(() => new Settings { FillPixelStep = 8 }.Validate());
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(980, 0, 616, 0)]
+    [InlineData(0, 980, 0, 616)]
+    [InlineData(980, 980, 616, 616)]
+    [InlineData(500, 600, 318, 418)]
+    public void OptimizedSelectionExpandsSmallCropAndClipsAtCanvasEdges(int x, int y, int left, int top)
+    {
+        using var bitmap = new SKBitmap(1000, 1000);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Red);
+        using var paint = new SKPaint { Color = SKColors.Blue };
+        canvas.DrawRect(x, y, 20, 20, paint);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 1000, 1000, [x, y, 20, 20]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1, true);
+        Assert.Equal(new SKRectI(left, top, left + 384, top + 384), prepared.Crop);
+        Assert.Equal((384, 384), (prepared.Width, prepared.Height));
+        using var source = SKBitmap.Decode(prepared.Source);
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal(SKColors.Blue, source.GetPixel(x - left + 10, y - top + 10));
+        Assert.Equal(SKColors.White, mask.GetPixel(x - left + 10, y - top + 10));
+        Assert.Equal(SKColors.Black, mask.GetPixel(x == left ? 100 : 0, y == top ? 100 : 0));
+        using var restored = SKBitmap.Decode(ImageTools.RestoreFill(prepared.Source, doc, prepared));
+        Assert.Equal((1000, 1000), (restored.Width, restored.Height));
+        Assert.Equal(SKColors.Blue, restored.GetPixel(x + 10, y + 10));
+        int outsideX = left == 0 ? 999 : 0;
+        int outsideY = top == 0 ? 999 : 0;
+        Assert.Equal(0, restored.GetPixel(outsideX, outsideY).Alpha);
+    }
+
+    [Fact]
+    public async Task OptimizedSelectionSendsBorderAndRestoresScaledResultAtOffset()
+    {
+        using var bitmap = new SKBitmap(3000, 2000);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 3000, 2000, [1000, 700, 1200, 800]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 16, true);
+        Assert.Equal(new SKRectI(936, 636, 2264, 1564), prepared.Crop);
+        Assert.Equal((1200, 832), (prepared.Width, prepared.Height));
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal(SKColors.Black, mask.GetPixel(10, 10));
+        Assert.Equal(SKColors.White, mask.GetPixel(prepared.Width / 2, prepared.Height / 2));
+        using var mappedMask = SKBitmap.Decode(ImageTools.RestoreFill(prepared.Mask!, doc, prepared));
+        Assert.Equal(SKColors.Black, mappedMask.GetPixel(990, 690));
+        Assert.Equal(SKColors.White, mappedMask.GetPixel(1010, 710));
+        Assert.Equal(SKColors.White, mappedMask.GetPixel(2190, 1490));
+        Assert.Equal(SKColors.Black, mappedMask.GetPixel(2210, 1510));
+        using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((_, body) =>
+        {
+            using var json = JsonDocument.Parse(body);
+            Assert.Equal(1200, json.RootElement.GetProperty("width").GetInt32());
+            Assert.Equal(832, json.RootElement.GetProperty("height").GetInt32());
+            Assert.Equal("data:image/png;base64," + Convert.ToBase64String(prepared.Mask!), json.RootElement.GetProperty("mask").GetString());
+            return """{"status":"succeeded","output":[{"data":"AQI="}]}""";
+        }));
+        await client.FillAsync(new Settings(), "fill", "", prepared.Source, prepared.Mask, prepared.Width, prepared.Height,
+            new Progress<string>(), CancellationToken.None);
+        using var generated = new SKBitmap(600, 416);
+        using (var canvas = new SKCanvas(generated)) canvas.Clear(SKColors.Blue);
+        using var generatedPng = generated.Encode(SKEncodedImageFormat.Png, 100);
+        using var restored = SKBitmap.Decode(ImageTools.RestoreFill(generatedPng.ToArray(), doc, prepared));
+        Assert.Equal(0, restored.GetPixel(935, 700).Alpha);
+        Assert.Equal(SKColors.Blue, restored.GetPixel(936, 636));
+        Assert.Equal(SKColors.Blue, restored.GetPixel(2263, 1563));
+        Assert.Equal(0, restored.GetPixel(2264, 1563).Alpha);
+    }
+
+    [Fact]
+    public void OptimizeIsIgnoredWithoutSelectionAndMinimumPaddingIsRemovedOnRestore()
+    {
+        using var bitmap = new SKBitmap(128, 64);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 128, 64, null);
+        var ordinary = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1);
+        var optimized = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1, true);
+        Assert.Equal(ordinary.Crop, optimized.Crop);
+        Assert.Equal(ordinary.Content, optimized.Content);
+        Assert.Equal(ordinary.Source, optimized.Source);
+        Assert.Null(optimized.Mask);
+        using var restored = SKBitmap.Decode(ImageTools.RestoreFill(optimized.Source, doc, optimized));
+        Assert.Equal((128, 64), (restored.Width, restored.Height));
+        Assert.Equal(SKColors.Red, restored.GetPixel(0, 0));
+        Assert.Equal(SKColors.Red, restored.GetPixel(127, 63));
+    }
+
+    [Fact]
+    public void OptimizedSelectionOnSmallCanvasKeepsMaskAndPlacementAligned()
+    {
+        using var bitmap = new SKBitmap(128, 64);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 128, 64, [30, 20, 20, 10]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 1, true);
+        Assert.Equal(new SKRectI(0, 0, 128, 64), prepared.Crop);
+        Assert.Equal((384, 384), (prepared.Width, prepared.Height));
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal(SKColors.White, mask.GetPixel(163, 185));
+        Assert.Equal(SKColors.Black, mask.GetPixel(10, 10));
+        using var restored = SKBitmap.Decode(ImageTools.RestoreFill(prepared.Mask!, doc, prepared));
+        Assert.Equal(SKColors.White, restored.GetPixel(35, 25));
+        Assert.Equal(SKColors.Black, restored.GetPixel(10, 10));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VeryWideImageIsPaddedAfterResolutionScaling(bool optimize)
+    {
+        using var bitmap = new SKBitmap(8000, 400);
+        using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        var doc = new DocumentInfo("test", "", 8000, 400, [0, 0, 8000, 400]);
+        var prepared = ImageTools.PrepareFill(encoded.ToArray(), doc, 1, 16, optimize);
+        Assert.Equal((4480, 384), (prepared.Width, prepared.Height));
+        Assert.Equal(new SKRect(0, 80, 4480, 304), prepared.Content);
+        using var mask = SKBitmap.Decode(prepared.Mask);
+        Assert.Equal(SKColors.Black, mask.GetPixel(10, 0));
+        Assert.Equal(SKColors.White, mask.GetPixel(10, 100));
+        Assert.Equal(SKColors.Black, mask.GetPixel(10, 383));
     }
 
     [Fact]
