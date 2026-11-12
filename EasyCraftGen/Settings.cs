@@ -6,7 +6,6 @@ public sealed class Settings
 {
     private static readonly string DirectoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "EasyCraftGen");
-    private static readonly string FilePath = Path.Combine(DirectoryPath, "settings.json");
     public string ServerUrl { get; set; } = "http://127.0.0.1:9000";
     public int Port { get; set; } = 7878;
     public string TokenPath { get; set; } = Path.Combine(DirectoryPath, "control.token");
@@ -25,14 +24,49 @@ public sealed class Settings
     public int Scale { get; set; } = 2;
     public bool OnTop { get; set; } = true;
 
-    public static Settings Load() => File.Exists(FilePath)
-        ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? throw new InvalidDataException("Settings file is empty.")
-        : new Settings();
+    public static Settings Load() => Load(DirectoryPath);
 
-    public void Save()
+    public static Settings Load(string directory)
     {
-        Directory.CreateDirectory(DirectoryPath);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        var path = Path.Combine(directory, "settings.json");
+        var settings = File.Exists(path)
+            ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? throw new InvalidDataException("Settings file is empty.")
+            : new Settings();
+        var generationPath = Path.Combine(directory, "generation-settings.json");
+        if (File.Exists(generationPath))
+        {
+            var generation = JsonSerializer.Deserialize<GenerationSettings>(File.ReadAllText(generationPath))
+                ?? throw new InvalidDataException("Generation settings file is empty.");
+            generation.ApplyTo(settings);
+        }
+        return settings;
+    }
+
+    public void Save() => Save(DirectoryPath);
+
+    public void Save(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "settings.json"), JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        SaveGeneration(directory);
+    }
+
+    public void SaveGeneration() => SaveGeneration(DirectoryPath);
+
+    public void SaveGeneration(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "generation-settings.json");
+        var temp = Path.Combine(directory, $".generation-settings-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(GenerationSettings.From(this), new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 
     public void Validate(bool photoCraft = true)
