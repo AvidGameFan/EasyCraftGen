@@ -1,10 +1,10 @@
 # EasyCraftGen
 
-EasyCraftGen is a C# / Avalonia companion window for PhotoCraft on Windows and Linux. It sends the image to a running Easy Diffusion server for a prompted fill or edit, then pastes the result into PhotoCraft as a new layer. A selection masks the fill; without one, the whole image is edited. It can also use Easy Diffusion's Real-ESRGAN filter to open an upscaled copy as a new document. It does not use Python or ComfyUI itself; Easy Diffusion is a separate application and has its own dependencies.
+EasyCraftGen is a C# / Avalonia companion window for PhotoCraft on Windows and Linux, with an experimental script-based PaintShop Pro integration on Windows. It sends the image to a running Easy Diffusion server for a prompted fill or edit, then returns the result as a new layer. A selection masks the fill; without one, the whole image is edited. In PhotoCraft it can also use Easy Diffusion's Real-ESRGAN filter to open an upscaled copy as a new document. EasyCraftGen itself does not use Python or ComfyUI; the PaintShop Pro integration uses PSP's embedded Python scripting, and Easy Diffusion is a separate application.
 
 ## Requirements
 
-- PhotoCraft 0.20 or newer with its local control channel enabled and **Preferences > Integrations > Allow Agent Control** enabled.
+- For PhotoCraft: version 0.20 or newer with its local control channel enabled and **Preferences > Integrations > Allow Agent Control** enabled. PaintShop Pro mode does not require PhotoCraft.
 - Easy Diffusion running (default `http://127.0.0.1:9000`), with a compatible diffusion model and Real-ESRGAN model installed. Use a model suited to inpainting for selected fills or instruction-based editing for whole-image edits. Model names in the window must match the server's installed models. Model support and results depend on the Easy Diffusion backend; not all models follow edit or removal instructions.
 - For running from source, .NET SDK 10.
 
@@ -36,6 +36,12 @@ For a selected fill, the generation mask is the selection's *bounding rectangle*
 **Optimize selection for low VRAM** (off by default) sends only the selection's bounding rectangle and at least 64 pixels of surrounding image where available. Small crops are expanded with additional image context when possible. The option has no effect without a selection. Every generation request is at least 384 pixels wide and high, even when optimization is off; smaller dimensions are padded with white after resolution scaling rather than stretching the image. Padding can make a request exceed the megapixel target, especially for very narrow images. Padding is removed from the result, and optimized results are positioned at the crop's original document offset before the actual selection is applied as a layer mask. Cropping reduces context, which may affect the result.
 
 Cancellation stops this app's wait, not necessarily a job already queued on Easy Diffusion. Avoid submitting sensitive images to untrusted servers.
+
+## PaintShop Pro integration (experimental)
+
+The separate `EasyCraftGen-PaintShopPro` folder contains `EasyCraftGen.PspScript` and its setup instructions. Edit `EASYCRAFTGEN_EXE` in the installed script to point to a built or packaged `EasyCraftGen.exe`, then run or bind the trusted script in PaintShop Pro. The script exports a temporary composite and launches EasyCraftGen in PaintShop Pro mode; enter the prompt and choose **Generate fill / edit**. On success, the script pastes the full-size result and applies the saved selection as a mask. With no selection it pastes an unmasked layer. Close the EasyCraftGen window to cancel; the **Cancel** button stops an active request and permits retrying or closing.
+
+PaintShop Pro may be blocked while the script waits. Do not edit or switch the original document until it finishes. The selection's bounding rectangle is used for generation and the actual selection is used for the layer mask; selection-bound interpretation, full integration, and feathering need validation in the real host. Optimized crops are reconstructed at full document size before the script pastes them. The script leaves its temporary files and duplicate/result documents for inspection, and reports a saved selection name that may remain in PSP's configured selection folder. Those files can contain private image data; delete them when no longer needed. Multilayer export flattens the duplicate and may lose transparency. Upscaling is not supported in this mode.
 
 ## Build and package
 

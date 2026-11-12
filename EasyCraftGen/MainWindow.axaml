@@ -6,7 +6,7 @@
   <ScrollViewer>
     <StackPanel Margin="18" Spacing="10">
       <TextBlock Text="EasyCraftGen" FontSize="24" FontWeight="SemiBold"/>
-      <TextBlock Text="PhotoCraft + Easy Diffusion" Opacity="0.7"/>
+      <TextBlock x:Name="HostLabel" Text="PhotoCraft + Easy Diffusion" Opacity="0.7"/>
       <TextBlock Text="Prompt starter (optional)"/>
       <ComboBox x:Name="PromptStarters" HorizontalAlignment="Stretch" PlaceholderText="Choose a starter to add to your prompt" AutomationProperties.Name="Prompt starter" SelectionChanged="PromptStarterChanged"/>
       <TextBlock Text="Prompt"/>
@@ -45,6 +45,7 @@
       </Expander>
       <TextBlock Text="With a selection, its bounding rectangle masks generation and the actual selection masks the new layer. Without a selection, the whole image is edited. Results depend on the model." TextWrapping="Wrap" Opacity="0.7" FontSize="12"/>
       <Button x:Name="FillButton" Content="Generate fill / edit" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="FillClick"/>
+      <StackPanel x:Name="UpscalePanel" Spacing="10">
       <Separator/>
       <TextBlock Text="Upscale" FontWeight="SemiBold" FontSize="16"/>
       <TextBlock Text="Real-ESRGAN model"/>
@@ -54,21 +55,24 @@
         <ComboBox x:Name="Scale" SelectedIndex="0"><ComboBoxItem Content="2x"/><ComboBoxItem Content="4x"/></ComboBox>
       </StackPanel>
       <Button x:Name="UpscaleButton" Content="Upscale to new document" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="UpscaleClick"/>
+      </StackPanel>
       <Separator/>
       <Expander Header="Connection and settings" IsExpanded="True">
         <StackPanel Spacing="7">
           <TextBlock Text="Easy Diffusion URL"/>
           <TextBox x:Name="ServerUrl" Text="http://127.0.0.1:9000"/>
           <Button x:Name="RefreshModelsButton" Content="Refresh model lists" Click="RefreshModelsClick"/>
+          <StackPanel x:Name="PhotoCraftSettings" Spacing="7">
           <TextBlock Text="PhotoCraft control port"/>
           <NumericUpDown x:Name="Port" Value="7878" Minimum="1" Maximum="65535" FormatString="0"/>
           <TextBlock Text="PhotoCraft token file"/>
           <TextBox x:Name="TokenPath"/>
           <TextBlock Text="PhotoCraft exchange directory"/>
           <TextBox x:Name="ExchangePath"/>
+          </StackPanel>
           <CheckBox x:Name="OnTop" IsChecked="True" Content="Keep window on top" IsCheckedChanged="OnTopChanged"/>
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="Test connections" Click="TestClick"/>
+            <Button x:Name="TestButton" Content="Test connections" Click="TestClick"/>
             <Button Content="Save settings" Click="SaveClick"/>
           </StackPanel>
         </StackPanel>

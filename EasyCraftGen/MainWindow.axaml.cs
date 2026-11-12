@@ -7,6 +7,11 @@ namespace EasyCraftGen;
 public partial class MainWindow : Window
 {
     private CancellationTokenSource? job;
+    private PaintShopJob? paintShopJob;
+    private bool paintShopMode;
+    private bool paintShopComplete;
+    private bool closeWhenIdle;
+    private string? startupError;
     private static readonly string[] SamplerOptions =
     [
         "euler", "euler_a", "ddim", "ddim_cfgpp", "plms", "heun", "heun_pp2", "dpm2", "dpm2_a",
@@ -21,14 +26,49 @@ public partial class MainWindow : Window
         "normal", "ddim", "beta", "turbo", "align_your_steps", "align_your_steps_GITS", "align_your_steps_11", "align_your_steps_32"
     ];
 
-    public MainWindow()
+    public MainWindow() : this([]) { }
+
+    public MainWindow(string[] args)
     {
         InitializeComponent();
         PromptStarters.ItemsSource = new[] { "Enhance ", "Colorize ", "Harmonize ", "Create ", "Change the style to ", "Remove " };
         try { ApplySettings(Settings.Load()); }
         catch (Exception ex) { Status.Text = $"Could not load settings: {ex.Message}"; ApplySettings(new Settings()); }
+        if (args.Length != 0)
+        {
+            paintShopMode = true;
+            HostLabel.Text = "PaintShop Pro + Easy Diffusion";
+            UpscalePanel.IsVisible = PhotoCraftSettings.IsVisible = false;
+            TestButton.Content = "Test Easy Diffusion";
+            Title = "EasyCraftGen - PaintShop Pro";
+            try
+            {
+                if (args.Length != 2 || args[0] != "--psp-job")
+                    throw new ArgumentException("Expected --psp-job followed by an absolute request.json path.");
+                paintShopJob = PaintShopJob.Load(args[1]);
+                Status.Text = paintShopJob.Document.Selection is null
+                    ? "PaintShop Pro: enter a prompt for the whole image."
+                    : "PaintShop Pro: enter a prompt for the selected area.";
+            }
+            catch (Exception ex) { startupError = $"Cannot open PaintShop Pro job: {ex.Message}"; Status.Text = startupError; }
+        }
         ServerUrl.TextChanged += (_, _) => ClearModelChoices();
-        Opened += async (_, _) => await RefreshModelsAsync();
+        if (startupError is null) Opened += async (_, _) => await RefreshModelsAsync();
+        Closing += (_, e) =>
+        {
+            if (!paintShopMode || paintShopComplete) return;
+            if (job is not null)
+            {
+                job.Cancel();
+                closeWhenIdle = true;
+                e.Cancel = true;
+                Status.Text = "Cancelling the current operation before closing...";
+                return;
+            }
+            if (paintShopJob is null) return;
+            try { paintShopJob.Cancel(); }
+            catch (Exception ex) { e.Cancel = true; Status.Text = $"Could not report cancellation to PaintShop Pro: {ex.Message}"; }
+        };
     }
 
     private void ClearModelChoices()
@@ -76,7 +116,7 @@ public partial class MainWindow : Window
             OptimizeSelection = OptimizeSelection.IsChecked == true,
             Scale = Scale.SelectedIndex == 1 ? 4 : 2, OnTop = OnTop.IsChecked == true
         };
-        s.Validate();
+        s.Validate(!paintShopMode);
         return s;
     }
 
@@ -141,6 +181,7 @@ public partial class MainWindow : Window
             job.Dispose(); job = null;
             FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = true;
             CancelButton.IsEnabled = false;
+            if (closeWhenIdle) Close();
         }
     }
     private void SaveClick(object? sender, RoutedEventArgs e)
@@ -151,28 +192,42 @@ public partial class MainWindow : Window
 
     private async void TestClick(object? sender, RoutedEventArgs e) => await RunAsync(async (s, ct) =>
     {
-        using var pc = await PhotoCraftClient.ConnectAsync(s, ct);
-        await pc.CallAsync("ui.inspect", null, ct);
+        if (!paintShopMode)
+        {
+            using var pc = await PhotoCraftClient.ConnectAsync(s, ct);
+            await pc.CallAsync("ui.inspect", null, ct);
+        }
         using var easy = new EasyDiffusionClient(s.ServerUrl);
         await easy.TestAsync(ct);
-        Status.Text = "PhotoCraft and Easy Diffusion connected. Exchange directory access was not tested.";
+        Status.Text = paintShopMode ? "Easy Diffusion connected." : "PhotoCraft and Easy Diffusion connected. Exchange directory access was not tested.";
     });
 
-    private async void FillClick(object? sender, RoutedEventArgs e) => await RunAsync(async (s, ct) =>
+    private async void FillClick(object? sender, RoutedEventArgs e)
     {
+        await RunAsync(GenerateAsync);
+        if (paintShopComplete) Close();
+    }
+
+    private async Task GenerateAsync(Settings s, CancellationToken ct)
+    {
+        if (startupError is not null) throw new InvalidOperationException(startupError);
         var prompt = Prompt.Text?.Trim() ?? "";
         var negative = NegativePrompt.Text?.Trim() ?? "";
         if (string.IsNullOrEmpty(prompt)) throw new ArgumentException("Enter a prompt describing what to create, change, or remove.");
+        if (paintShopJob is not null)
+        {
+            var source = await File.ReadAllBytesAsync(paintShopJob.SourcePath, ct);
+            var result = await GenerateImageAsync(s, prompt, negative, source, paintShopJob.Document, ct);
+            await paintShopJob.CompleteAsync(result, ct);
+            paintShopComplete = true;
+            Status.Text = "Result ready for PaintShop Pro.";
+            return;
+        }
         Status.Text = "Reading PhotoCraft document...";
         using var pc = await PhotoCraftClient.ConnectAsync(s, ct);
         var doc = await pc.InspectAsync(ct);
         var original = await pc.ExportAsync(s.ExchangePath, ct);
-        var prepared = ImageTools.PrepareFill(original, doc, s.FillMegapixels, s.FillPixelStep, s.OptimizeSelection);
-        using var easy = new EasyDiffusionClient(s.ServerUrl);
-        Status.Text = $"Generating {(prepared.Mask is null ? "edit" : "fill")} (requested {prepared.Width} x {prepared.Height}) in Easy Diffusion...";
-        var generated = await easy.FillAsync(s, prompt, negative, prepared.Source, prepared.Mask, prepared.Width, prepared.Height,
-            new Progress<string>(message => Status.Text = message), ct);
-        generated = ImageTools.RestoreFill(generated, doc, prepared);
+        var generated = await GenerateImageAsync(s, prompt, negative, original, doc, ct);
         ct.ThrowIfCancellationRequested();
         var current = await pc.InspectAsync(ct);
         if (!doc.SameDocument(current) || !doc.SameSelection(current))
@@ -183,13 +238,21 @@ public partial class MainWindow : Window
         var name = $"easycraftgen-fill-{Guid.NewGuid():N}.png";
         var path = Path.Combine(s.ExchangePath, name);
         await File.WriteAllBytesAsync(path, generated, ct);
-        Status.Text = prepared.Mask is null ? "Placing edited layer in PhotoCraft..." : "Placing masked layer in PhotoCraft...";
+        Status.Text = doc.Selection is null ? "Placing edited layer in PhotoCraft..." : "Placing masked layer in PhotoCraft...";
         CancelButton.IsEnabled = false;
         try { await pc.PlaceAsync(name, doc, CancellationToken.None); }
         catch (Exception ex) { throw new InvalidOperationException($"Placement failed. Result saved at {path}. PhotoCraft may contain partial changes: {ex.Message}", ex); }
         File.Delete(path);
-        Status.Text = prepared.Mask is null ? "Edit added as a new layer." : "Fill added as a masked layer.";
-    });
+        Status.Text = doc.Selection is null ? "Edit added as a new layer." : "Fill added as a masked layer.";
+    }
+
+    private async Task<byte[]> GenerateImageAsync(Settings s, string prompt, string negative, byte[] original, DocumentInfo doc, CancellationToken ct)
+    {
+        using var easy = new EasyDiffusionClient(s.ServerUrl);
+        return await FillGeneration.GenerateAsync(easy, s, prompt, negative, original, doc,
+            prepared => Status.Text = $"Generating {(prepared.Mask is null ? "edit" : "fill")} (requested {prepared.Width} x {prepared.Height}) in Easy Diffusion...",
+            new Progress<string>(message => Status.Text = message), ct);
+    }
 
     private async void UpscaleClick(object? sender, RoutedEventArgs e) => await RunAsync(async (s, ct) =>
     {
@@ -222,6 +285,11 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (job.IsCancellationRequested) { Status.Text = "Cancelled locally. Easy Diffusion may still finish its queued job."; }
         catch (OperationCanceledException) { Status.Text = "The request timed out. Easy Diffusion may still finish its queued job."; }
         catch (Exception ex) { Status.Text = ex.Message; }
-        finally { job.Dispose(); job = null; FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = true; CancelButton.IsEnabled = false; }
+        finally
+        {
+            job.Dispose(); job = null;
+            FillButton.IsEnabled = UpscaleButton.IsEnabled = RefreshModelsButton.IsEnabled = true; CancelButton.IsEnabled = false;
+            if (closeWhenIdle && !paintShopComplete) Close();
+        }
     }
 }

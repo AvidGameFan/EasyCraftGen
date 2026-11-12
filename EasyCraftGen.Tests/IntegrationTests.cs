@@ -8,6 +8,51 @@ namespace EasyCraftGen.Tests;
 
 public class IntegrationTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PaintShopJobRunsSharedGenerationAndReturnsFullSize(bool selected)
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "easycraftgen-psp-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            using var bitmap = new SKBitmap(800, 600);
+            using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.Red);
+            using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+            await File.WriteAllBytesAsync(Path.Combine(folder, "composite.png"), encoded.ToArray());
+            await File.WriteAllTextAsync(Path.Combine(folder, "request.json"),
+                selected ? """{"version":1,"width":800,"height":600,"selection":[100,100,50,50]}"""
+                         : """{"version":1,"width":800,"height":600,"selection":null}""");
+            var job = PaintShopJob.Load(Path.Combine(folder, "request.json"));
+            using var client = new EasyDiffusionClient("http://localhost:9000", new FakeHttp((request, body) =>
+            {
+                using var json = JsonDocument.Parse(body);
+                var root = json.RootElement;
+                Assert.Equal(selected, root.TryGetProperty("mask", out _));
+                Assert.Equal("Change the subject", root.GetProperty("prompt").GetString());
+                var width = root.GetProperty("width").GetInt32();
+                var height = root.GetProperty("height").GetInt32();
+                Assert.True(width >= 384 && height >= 384);
+                if (selected) Assert.True(width < 800);
+                using var result = new SKBitmap(width, height);
+                using (var canvas = new SKCanvas(result)) canvas.Clear(SKColors.Blue);
+                using var png = result.Encode(SKEncodedImageFormat.Png, 100);
+                return JsonSerializer.Serialize(new { status = "succeeded", output = new[] { new { data = Convert.ToBase64String(png.ToArray()) } } });
+            }));
+            var generated = await FillGeneration.GenerateAsync(client, new Settings { OptimizeSelection = true },
+                "Change the subject", "", await File.ReadAllBytesAsync(job.SourcePath), job.Document,
+                _ => { }, new Progress<string>(), CancellationToken.None);
+            await job.CompleteAsync(generated, CancellationToken.None);
+            using var restored = SKBitmap.Decode(job.ResultPath);
+            Assert.Equal((800, 600), (restored.Width, restored.Height));
+            Assert.Equal(SKColors.Blue, restored.GetPixel(110, 110));
+            if (selected) Assert.Equal((byte)0, restored.GetPixel(799, 599).Alpha);
+            else Assert.Equal(SKColors.Blue, restored.GetPixel(799, 599));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
     [Fact]
     public async Task FillUsesMaskAndHandlesConcatenatedStreamObjects()
     {

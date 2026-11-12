@@ -35,12 +35,12 @@ public sealed class Settings
         File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    public void Validate()
+    public void Validate(bool photoCraft = true)
     {
         ValidateServerUrl(ServerUrl);
-        if (Port is < 1 or > 65535 || !Path.IsPathFullyQualified(TokenPath) || !Path.IsPathFullyQualified(ExchangePath))
+        if (photoCraft && (Port is < 1 or > 65535 || !Path.IsPathFullyQualified(TokenPath) || !Path.IsPathFullyQualified(ExchangePath)))
             throw new ArgumentException("Enter a valid port and absolute token and exchange paths.");
-        if (string.IsNullOrWhiteSpace(Model) || string.IsNullOrWhiteSpace(UpscaleModel))
+        if (string.IsNullOrWhiteSpace(Model) || (photoCraft && string.IsNullOrWhiteSpace(UpscaleModel)))
             throw new ArgumentException("Enter diffusion and upscaler model names.");
         if (string.IsNullOrWhiteSpace(Sampler) || string.IsNullOrWhiteSpace(Scheduler))
             throw new ArgumentException("Select a sampler and scheduler.");
