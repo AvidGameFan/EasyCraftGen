@@ -213,6 +213,9 @@ public partial class MainWindow : Window
         if (startupError is not null) throw new InvalidOperationException(startupError);
         var prompt = Prompt.Text?.Trim() ?? "";
         var negative = NegativePrompt.Text?.Trim() ?? "";
+        // Automatically save settings before generation - may or may not be expected behavior.
+        try { s.Save(); }
+        catch (Exception ex) { throw new InvalidOperationException($"Could not save settings; generation was not started: {ex.Message}", ex); }
         if (string.IsNullOrEmpty(prompt)) throw new ArgumentException("Enter a prompt describing what to create, change, or remove.");
         if (paintShopJob is not null)
         {
